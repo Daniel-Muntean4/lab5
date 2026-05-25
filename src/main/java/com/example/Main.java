@@ -122,7 +122,7 @@ public class Main {
     }
 
     static void search(String searchedItem) throws IOException {
-        String encoded = URLEncoder.encode(searchedItem, StandardCharsets.UTF_8);
+        String encoded = URLEncoder.encode(searchedItem, StandardCharsets.US_ASCII);
         String url = "https://html.duckduckgo.com/html/?q="+encoded;
         URI uri = URI.create(url);
         String scheme = uri.getScheme();
@@ -138,10 +138,10 @@ public class Main {
         else {
             socket = new Socket(host, 80);
         }
-        String httpRequest = "GET " + path + query + " HTTP/1.1\r\n" +
+        String httpRequest = "GET " + "/html/?q=" + encoded+ " HTTP/1.1\r\n" +
                 "Host: " + host + "\r\n" +
-                "User-agent: go2web/1.0\r\n" +
-                "Accept: text/html\r\n" +
+                "User-agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15\r\n"
+                +"Accept: text/html\r\n" +
                 "Accept-encoding: identity\r\n" +
                 "Connection: close\r\n" +
                 "\r\n";
@@ -166,16 +166,15 @@ public class Main {
         String parsedText = Jsoup.parse(plainText).text();
         String[] parsedArray = plainText.split(" ");
         String httpCodeResponse = parsedArray[1];
-
+        System.out.println(encoded);
         Document document = Jsoup.parse(plainText);
-        System.out.println(parsedText+" "+httpCodeResponse);
+        System.out.println(plainText+" "+httpCodeResponse);
         System.out.println();
         Elements results = document.select("a.result__a");
         for (Element link : results.subList(0, Math.min(10, results.size()))){
             String title = link.text();
             String href = link.attr("href");
             System.out.println(title + " - " + href);
-            //these are not detected, try to sout everyting work on this
         }
 
 
