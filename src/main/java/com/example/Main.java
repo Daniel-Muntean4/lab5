@@ -120,6 +120,67 @@ public class Main {
 
         }
     }
+
+    static void search(String searchedItem) throws IOException {
+        String encoded = URLEncoder.encode(searchedItem, StandardCharsets.UTF_8);
+        String url = "https://html.duckduckgo.com/html/?q="+encoded;
+        URI uri = URI.create(url);
+        String scheme = uri.getScheme();
+        String host = uri.getHost();
+        String path = uri.getRawPath();
+        String query = uri.getRawQuery();
+        Socket socket;
+
+        if (scheme.contains("https")) {
+            SSLSocketFactory sslSocketFactory = (SSLSocketFactory) SSLSocketFactory.getDefault();
+            socket = sslSocketFactory.createSocket(host, 443);
+        }
+        else {
+            socket = new Socket(host, 80);
+        }
+        String httpRequest = "GET " + path + query + " HTTP/1.1\r\n" +
+                "Host: " + host + "\r\n" +
+                "User-agent: go2web/1.0\r\n" +
+                "Accept: text/html\r\n" +
+                "Accept-encoding: identity\r\n" +
+                "Connection: close\r\n" +
+                "\r\n";
+
+        OutputStream outputStream = socket.getOutputStream();
+        outputStream.write(httpRequest.getBytes(StandardCharsets.UTF_8));
+        outputStream.flush();
+
+        InputStream inputStream = socket.getInputStream();
+
+        int n;
+        byte[] chunk = new byte[4096];
+
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+
+        while((n=inputStream.read(chunk))!=-1){
+            buffer.write(chunk,0,n);
+        }
+
+        String plainText = buffer.toString(StandardCharsets.UTF_8);
+
+        String parsedText = Jsoup.parse(plainText).text();
+        String[] parsedArray = plainText.split(" ");
+        String httpCodeResponse = parsedArray[1];
+
+        Document document = Jsoup.parse(plainText);
+        System.out.println(parsedText+" "+httpCodeResponse);
+        System.out.println();
+        Elements results = document.select("a.result__a");
+        for (Element link : results.subList(0, Math.min(10, results.size()))){
+            String title = link.text();
+            String href = link.attr("href");
+            System.out.println(title + " - " + href);
+            //these are not detected, try to sout everyting work on this
+        }
+
+
+
+    }
 }
 
 
