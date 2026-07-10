@@ -4,182 +4,190 @@ import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
-import javax.net.SocketFactory;
-import javax.net.ssl.SSLSocket;
+
 import javax.net.ssl.SSLSocketFactory;
-import javax.print.DocFlavor;
 import java.io.*;
 import java.net.Socket;
 import java.net.URI;
 import java.net.URLEncoder;
-import java.nio.charset.Charset;
-import java.nio.charset.CharsetEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Arrays;
-
-
 public class Main {
+
+
+    private static final int MAX_REDIRECTS = 5;
+    private static final String USER_AGENT =
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) " +
+                    "AppleWebKit/605.1.15 (KHTML, like Gecko) " +
+                    "Version/17.5 Safari/605.1.15";
+
     public static void main(String[] args) throws IOException {
-        int counter = 0;
-        System.out.println("Hello world!");
-        int port = 80;
-        if(args.length<2){
-            System.out.println("-h for help, -s for search, -u for url");
 
-        }
-        if(args[0].equals("-h")){
-            System.out.println("-h for help, -s for search, -u for url");
-        }
-        if(args[0].equals("-u")){
-            fetchAndPrint(args[1]);
-        }
-        if(args[0].equals("-s")){
-            StringBuilder searchedTerm = new StringBuilder();
-            for(int i= 1; i<args.length;i++){
-                searchedTerm.append(args[i]+" ");
-            }
-            search(searchedTerm.toString());
 
+        if(args.length == 0 || args[0].equals("h")){
+            printHelp();
+            return;
         }
 
+        switch (args[0]) {
+            case "-u":
+                if (args.length<2){
+                    System.out.println("Missing URL.");
+                    printHelp();
+                }
+                else {
+                    fetchAndPrint(args[1]);
+                }
+            case "-s":
+                if (args.length<2){
+                    System.out.println("Missing search term.");
+                    printHelp();
+                }
+                else {
+                    search(String.join(" ",Arrays.copyOfRange(args,1,args.length)));
+                }
 
+            default: printHelp();
 
+        }
+    }
+    static void printHelp(){
+        System.out.println("Usage:");
+        System.out.println("-h Show help");
+        System.out.println("-s <search terms> Search DuckDuckGo");
+        System.out.println("-u <url> Fetch and print all text from url, with a limit of "+MAX_REDIRECTS+" redirects");
     }
 
     static void fetchAndPrint(String urlString) throws IOException {
-        int counter = 0;
-        System.out.println("Hello world!");
-        int port = 80;
-        URI uri = URI.create(urlString);
-        while(true){
-            String scheme = uri.getScheme();
-            String host = uri.getHost();
-            String path = uri.getRawPath();
-            String query = uri.getRawQuery();
-            Socket socket;
-
-            if (scheme.equals("https")) {
-                SSLSocketFactory sslSocketFactory = (SSLSocketFactory) SSLSocketFactory.getDefault();
-                socket = sslSocketFactory.createSocket(host, 443);
-            }
-            else {
-                socket = new Socket(host, 80);
-            }
-            String requestTarget=path;
-            if(!(query==null)){
-                requestTarget=path+query;
-
-            }
-            System.out.println(requestTarget);
-            String httpRequest = "GET " + requestTarget + " HTTP/1.1\r\n" +
-                    "Host: " + host + "\r\n" +
-                    "User-agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15\r\n" +
-                    "Accept: text/html\r\n" +
-                    "Accept-encoding: identity\r\n" +
-                    "Connection: close\r\n" +
-                    "\r\n";
-
-            OutputStream outputStream = socket.getOutputStream();
-            outputStream.write(httpRequest.getBytes(StandardCharsets.UTF_8));
-            outputStream.flush();
-
-            InputStream inputStream = socket.getInputStream();
-
-            int n;
-            byte[] chunk = new byte[4096];
-
-            ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-
-            while((n=inputStream.read(chunk))!=-1){
-                buffer.write(chunk,0,n);
-            }
-
-            String plainText = buffer.toString(StandardCharsets.UTF_8);
-            int separator = plainText.indexOf("\r\n\r\n");
-            String bodyText = plainText.substring(separator);
-            Document document = Jsoup.parse(bodyText);
-
-            String parsedText = Jsoup.parse(bodyText).text();
-            String[] parsedArray = plainText.split(" ");
-            String httpCodeResponse = parsedArray[1];
-            System.out.println(parsedText);
-            System.out.println(uri.toString());
-            System.out.println(document.location());
-            if(httpCodeResponse.contains("30")){
-                uri = uri.resolve(document.location());
-                counter++;
-                if (counter>=5){
-                    break;
-                }
-                else {
-                    continue;
-                }
-            }
-
-            break;
-
-        }
+        HttpResponse httpResponse = fetchWithRedirects(URI.create(urlString));
+        Document document = Jsoup.parse(httpResponse.body);
+        String body = document.text();
+        System.out.println(body);
     }
 
     static void search(String searchedItem) throws IOException {
-        String encoded = URLEncoder.encode(searchedItem, StandardCharsets.US_ASCII);
-        String url = "https://html.duckduckgo.com/html/?q="+encoded;
-        URI uri = URI.create(url);
-        String scheme = uri.getScheme();
+        String encoded = URLEncoder.encode(searchedItem, StandardCharsets.UTF_8);
+        URI uri = URI.create("https://html.duckduckgo.com/html/?q="+encoded);
+        HttpResponse httpResponse = fetchWithRedirects(uri);
+        Document document = Jsoup.parse(httpResponse.body, uri.toString());
+        Elements results  = document.select("a.results__a");
+        for(Element link : results.subList(0, Math.min(10, results.size()))){
+            String title = link.text();
+            String href = link.absUrl("href");
+            System.out.println(title +" - "+href);
+        }
+    }
+
+    static HttpResponse fetchWithRedirects(URI uri) throws IOException {
+        int redirects = 0;
+        while (true){
+            HttpResponse response = sendHttpRequest(uri);
+
+            if(response.statusCode>=300 && response.statusCode<400){
+                String location = response.headers.get("location");
+                if(location==null) return response;
+                uri = uri.resolve(location);
+                redirects++;
+                if(redirects>=MAX_REDIRECTS){
+                    throw new IOException("Too many redirects");
+                }
+
+            }
+            else {
+                return response;
+            }
+
+        }
+    }
+
+    static HttpResponse sendHttpRequest(URI uri) throws IOException {
         String host = uri.getHost();
         String path = uri.getRawPath();
+        String scheme = uri.getScheme();
         String query = uri.getRawQuery();
+        HttpResponse httpResponse;
+        int port;
+        if (host == null || scheme == null) {
+            throw new IOException("Missing host or scheme");
+        }
+        if (path == null || path.isBlank()) {
+            path = "/";
+        }
+        String requestTarget = path;
+        if (query != null) {
+            requestTarget += "?" + query;
+        }
         Socket socket;
-
-        if (scheme.contains("https")) {
+        if (scheme.equalsIgnoreCase("https")) {
+            port = 443;
             SSLSocketFactory sslSocketFactory = (SSLSocketFactory) SSLSocketFactory.getDefault();
-            socket = sslSocketFactory.createSocket(host, 443);
+            socket = sslSocketFactory.createSocket(host, port);
+        } else if(scheme.equalsIgnoreCase("http")){
+            port = 80;
+            socket = new Socket(host, port);
         }
         else {
-            socket = new Socket(host, 80);
+            throw new IOException("Unsupported scheme: "+ scheme);
         }
-        String httpRequest = "GET " + "/html/?q=" + encoded+ " HTTP/1.1\r\n" +
+        try(socket;
+        InputStream inputStream = socket.getInputStream();
+        OutputStream outputStream = socket.getOutputStream()){
+        String httpRequest = "GET " + requestTarget + " HTTP/1.1\r\n" +
                 "Host: " + host + "\r\n" +
-                "User-agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15\r\n"
-                +"Accept: text/html\r\n" +
-                "Accept-encoding: identity\r\n" +
-                "Connection: close\r\n" +
-                "\r\n";
-
-        OutputStream outputStream = socket.getOutputStream();
+                "User-Agent: " + USER_AGENT + "\r\n" +
+                "Accept: text/html\r\n" +
+                "Accept-Encoding: identity\r\n" +
+                "Connection: close\r\n"
+                + "\r\n";
         outputStream.write(httpRequest.getBytes(StandardCharsets.UTF_8));
         outputStream.flush();
-
-        InputStream inputStream = socket.getInputStream();
-
+        ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
+        byte[] bytes = new byte[2048];
         int n;
-        byte[] chunk = new byte[4096];
+        while(( n = inputStream.read(bytes))!=-1){
+            byteArrayOutputStream.write(bytes,0,n);
+            }
+         httpResponse = parseHttpResponse(byteArrayOutputStream.toString(StandardCharsets.UTF_8));
+    }
+        return httpResponse;
+    }
 
-        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
 
-        while((n=inputStream.read(chunk))!=-1){
-            buffer.write(chunk,0,n);
+    static HttpResponse parseHttpResponse(String plainText) throws IOException {
+        String separator = "\r\n\r\n";
+        if(!plainText.contains(separator)){
+            throw new IOException("Invalid HTTP response");
         }
-
-        String plainText = buffer.toString(StandardCharsets.UTF_8);
-
-        String parsedText = Jsoup.parse(plainText).text();
-        String[] parsedArray = plainText.split(" ");
-        String httpCodeResponse = parsedArray[1];
-        System.out.println(encoded);
-        Document document = Jsoup.parse(plainText);
-        System.out.println(plainText+" "+httpCodeResponse);
-        System.out.println();
-        Elements results = document.select("a.result__a");
-        for (Element link : results.subList(0, Math.min(10, results.size()))){
-            String title = link.text();
-            String href = link.attr("href");
-            System.out.println(title + " - " + href);
+        String[] dividedResponse = plainText.split(separator);
+        String header = dividedResponse[0];
+        String body = dividedResponse[1];
+        String[] headerLines = header.split("\r\n");
+        int statusCode = Integer.parseInt(headerLines[0].split(" ")[1]);
+        LinkedHashMap<String, String> headers = new LinkedHashMap<>();
+        String headerName;
+        String headerValue;
+        for(int i = 1; i< headerLines.length; i++){
+            String headerLine = headerLines[i];
+            headerName = headerLine.substring(0, headerLine.indexOf(":")).trim().toLowerCase();
+            headerValue = headerLine.substring(headerLine.indexOf(":")+1).trim();
+            headers.put(headerName,headerValue);
         }
-
-
+        return new HttpResponse(statusCode,headers,body);
 
     }
-}
 
+    static class HttpResponse {
+        int statusCode;
+        Map<String, String> headers;
+        String body;
+
+        HttpResponse(int statusCode, Map<String, String> headers, String body) {
+            this.statusCode = statusCode;
+            this.headers = headers;
+            this.body = body;
+        }
+    }
+}
 
