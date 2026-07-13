@@ -40,6 +40,7 @@ public class Main {
                 else {
                     fetchAndPrint(args[1]);
                 }
+                break;
             case "-s":
                 if (args.length<2){
                     System.out.println("Missing search term.");
@@ -48,6 +49,7 @@ public class Main {
                 else {
                     search(String.join(" ",Arrays.copyOfRange(args,1,args.length)));
                 }
+                break;
 
             default: printHelp();
 
